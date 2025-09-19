@@ -355,9 +355,11 @@ class MCPServer:
         # Detect crossings with history
         crossing_data = detect_crossings_with_history(df)
 
-        # Get last bar
+        # Get last two bars for comparison
         last = df.iloc[-1]
+        prev = df.iloc[-2] if len(df) > 1 else last
 
+        # Current snapshot
         snapshot = {
             "price": float(last["close"]),
             "ema9": float(last["ema9"]) if not pd.isna(last["ema9"]) else None,
@@ -374,12 +376,34 @@ class MCPServer:
             "time": str(df.index[-1])
         }
 
+        # Previous snapshot for delta calculations
+        prev_snapshot = {
+            "price": float(prev["close"]),
+            "ema9": float(prev["ema9"]) if not pd.isna(prev["ema9"]) else None,
+            "ma10": float(prev["ma10"]) if not pd.isna(prev["ma10"]) else None,
+            "macd": float(prev["macd"]) if not pd.isna(prev["macd"]) else None,
+            "signal": float(prev["signal"]) if not pd.isna(prev["signal"]) else None,
+            "hist": float(prev["hist"]) if not pd.isna(prev["hist"]) else None,
+            "rsi": float(prev["rsi"]) if not pd.isna(prev["rsi"]) else None,
+            "volume": float(prev["volume"]),
+            "time": str(df.index[-2]) if len(df) > 1 else str(df.index[-1])
+        }
+
+        # Calculate trend state
+        trend_state = self.calculate_trend_state(last)
+
+        # Determine risk anchor
+        risk_anchor = self.calculate_risk_anchor(df, last, trend_state)
+
         return {
             "ready": True,
             "symbol": symbol,
             "asset_type": "crypto" if is_crypto else "stock",
             "tf": timeframe,
             "snapshot": snapshot,
+            "prev_snapshot": prev_snapshot,  # NEW: Previous bar for deltas
+            "trend_state": trend_state,      # NEW: Compact position summary
+            "risk_anchor": risk_anchor,      # NEW: Stop loss suggestion
             "crossings": crossing_data["crossings"],
             "bars_since": crossing_data["bars_since"],
             "last_cross": crossing_data["last_cross"]
@@ -594,6 +618,171 @@ class MCPServer:
             "storage": "parquet",
             "max_bars_in_memory": 3000
         }
+
+    def calculate_trend_state(self, last_row) -> str:
+        """
+        Calculate overall trend state based on multiple indicators
+        Returns: 'bullish', 'bearish', 'mixed', or 'consolidating'
+        """
+        bullish_signals = 0
+        bearish_signals = 0
+
+        # Price vs moving averages
+        if not pd.isna(last_row["ema9"]):
+            if last_row["close"] > last_row["ema9"]:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
+
+        if not pd.isna(last_row["ma10"]):
+            if last_row["close"] > last_row["ma10"]:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
+
+        # MACD
+        if not pd.isna(last_row["macd"]) and not pd.isna(last_row["signal"]):
+            if last_row["macd"] > last_row["signal"]:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
+
+            # MACD histogram direction
+            if not pd.isna(last_row["hist"]):
+                if last_row["hist"] > 0:
+                    bullish_signals += 1
+                else:
+                    bearish_signals += 1
+
+        # RSI levels
+        if not pd.isna(last_row["rsi"]):
+            if last_row["rsi"] > 50:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
+
+            # Extreme RSI levels (stronger signal)
+            if last_row["rsi"] > 70:
+                bearish_signals += 1  # Overbought warning
+            elif last_row["rsi"] < 30:
+                bullish_signals += 1  # Oversold opportunity
+
+        # Bollinger Bands position
+        if not pd.isna(last_row["bb_upper"]) and not pd.isna(last_row["bb_lower"]):
+            bb_range = last_row["bb_upper"] - last_row["bb_lower"]
+            price_position = (last_row["close"] - last_row["bb_lower"]) / bb_range if bb_range > 0 else 0.5
+
+            if price_position > 0.8:
+                bearish_signals += 1  # Near upper band
+            elif price_position < 0.2:
+                bullish_signals += 1  # Near lower band
+            else:
+                pass  # Neutral in middle
+
+        # VWAP comparison
+        if not pd.isna(last_row["vwap"]):
+            if last_row["close"] > last_row["vwap"]:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
+
+        # Determine overall state
+        total_signals = bullish_signals + bearish_signals
+        if total_signals == 0:
+            return "consolidating"
+
+        bullish_ratio = bullish_signals / total_signals
+
+        if bullish_ratio >= 0.7:
+            return "bullish"
+        elif bullish_ratio <= 0.3:
+            return "bearish"
+        elif 0.45 <= bullish_ratio <= 0.55:
+            return "consolidating"
+        else:
+            return "mixed"
+
+    def calculate_risk_anchor(self, df: pd.DataFrame, last_row, trend_state: str) -> Dict[str, Any]:
+        """
+        Calculate risk anchor (suggested stop loss placement) based on market structure
+        Returns dict with stop price and reasoning
+        """
+        risk_anchor = {
+            "price": None,
+            "type": None,
+            "distance_pct": None,
+            "reasoning": None
+        }
+
+        current_price = last_row["close"]
+
+        # Method 1: ATR-based stop (if we have enough data)
+        if len(df) >= 14:
+            # Calculate ATR
+            high_low = df["high"] - df["low"]
+            high_close = abs(df["high"] - df["close"].shift())
+            low_close = abs(df["low"] - df["close"].shift())
+            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+            atr = true_range.rolling(14).mean().iloc[-1]
+
+            if not pd.isna(atr):
+                # Use 2x ATR for stop distance
+                atr_stop = current_price - (2 * atr)
+                risk_anchor["price"] = atr_stop
+                risk_anchor["type"] = "ATR"
+                risk_anchor["distance_pct"] = ((current_price - atr_stop) / current_price) * 100
+                risk_anchor["reasoning"] = f"2x ATR ({atr:.2f}) below entry"
+
+        # Method 2: Bollinger Band based stop
+        if not pd.isna(last_row["bb_lower"]) and risk_anchor["price"] is None:
+            bb_stop = last_row["bb_lower"] * 0.995  # Slightly below lower band
+            risk_anchor["price"] = bb_stop
+            risk_anchor["type"] = "Bollinger"
+            risk_anchor["distance_pct"] = ((current_price - bb_stop) / current_price) * 100
+            risk_anchor["reasoning"] = "Below lower Bollinger Band"
+
+        # Method 3: Recent swing low
+        if len(df) >= 20 and (risk_anchor["price"] is None or trend_state == "bullish"):
+            # Find recent swing low
+            recent_lows = df["low"].tail(20)
+            swing_low = recent_lows.min()
+
+            if swing_low < current_price:
+                swing_stop = swing_low * 0.995  # Slightly below swing low
+
+                # Use swing low if it's closer than current anchor (for bullish trends)
+                if risk_anchor["price"] is None or (trend_state == "bullish" and swing_stop > risk_anchor["price"]):
+                    risk_anchor["price"] = swing_stop
+                    risk_anchor["type"] = "SwingLow"
+                    risk_anchor["distance_pct"] = ((current_price - swing_stop) / current_price) * 100
+                    risk_anchor["reasoning"] = "Below recent swing low"
+
+        # Method 4: Moving average support
+        if not pd.isna(last_row["ema9"]) and trend_state == "bullish":
+            ema_stop = last_row["ema9"] * 0.99  # 1% below EMA9
+
+            # Use EMA stop if it's tighter than current (for strong trends)
+            if risk_anchor["price"] is None or (ema_stop > risk_anchor["price"] and risk_anchor["distance_pct"] > 3):
+                risk_anchor["price"] = ema_stop
+                risk_anchor["type"] = "EMA"
+                risk_anchor["distance_pct"] = ((current_price - ema_stop) / current_price) * 100
+                risk_anchor["reasoning"] = "Below EMA9 support"
+
+        # Method 5: Fixed percentage (fallback)
+        if risk_anchor["price"] is None:
+            # Default to 2% stop
+            fixed_stop = current_price * 0.98
+            risk_anchor["price"] = fixed_stop
+            risk_anchor["type"] = "Fixed"
+            risk_anchor["distance_pct"] = 2.0
+            risk_anchor["reasoning"] = "Fixed 2% stop loss"
+
+        # Round values for cleaner output
+        if risk_anchor["price"] is not None:
+            risk_anchor["price"] = round(risk_anchor["price"], 2)
+            risk_anchor["distance_pct"] = round(risk_anchor["distance_pct"], 2)
+
+        return risk_anchor
 
     async def run(self):
         """Main loop to handle stdin/stdout communication"""
