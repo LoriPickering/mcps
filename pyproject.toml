@@ -1,0 +1,92 @@
+[project]
+name = "mcp-chart-signals"
+version = "0.1.0"
+description = "MCP server for trading indicators and signals"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Core
+    "pip>=24.0",
+    "pydantic>=2.0.0",
+    "typing-extensions",
+
+    # Web Framework
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+
+    # MCP (optional - comment out if not available)
+    # "mcp>=0.1.0",
+
+    # Data Processing & Technical Analysis
+    "pandas>=2.1.0",
+    "pandas-ta>=0.3.14b0",
+    "numpy>=1.26.0",
+    "pyarrow>=14.0.0",  # For parquet file support
+
+    # Market Data
+    "alpaca-py>=0.13.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.24.0",
+]
+
+[project.scripts]
+mcp-signals = "ta_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["/"]
+include = [
+    "*.py",
+    "README.md",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-mock>=3.12.0",
+    "pytest-cov>=4.1.0",
+    "pytest-forked>=1.6.0",
+    "ruff>=0.5.0",
+    "mypy>=1.10.0",
+    "black>=24.0.0",
+    "isort>=5.13.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.black]
+line-length = 120
+target-version = ['py312']
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
