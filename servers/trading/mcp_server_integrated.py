@@ -22,11 +22,18 @@ from dotenv import load_dotenv
 import pandas as pd
 import pandas_ta as ta
 import numpy as np
+import sys
+from pathlib import Path
 
-load_dotenv()
+# Get project root (2 levels up from this file)
+PROJECT_ROOT = Path(__file__).parent.parent.parent.absolute()
+DATA_DIR = PROJECT_ROOT / "data"
+sys.path.insert(0, str(PROJECT_ROOT))
 
-# Data paths
-DATA_DIR = Path("data")
+# Load env from project root
+env_path = PROJECT_ROOT / ".env"
+load_dotenv(env_path)
+
 CANDLES = {}  # In-memory cache
 
 def ensure_data_directories():
@@ -409,7 +416,8 @@ class MCPServer:
         watchlist_crypto = []
 
         try:
-            with open("watchlist.txt", "r") as f:
+            watchlist_path = PROJECT_ROOT / "watchlist.txt"
+            with open(watchlist_path, "r") as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith("#"):
