@@ -64,18 +64,13 @@ clean:
 	@echo "Clean complete!"
 
 run:
-	@echo "Starting MCP Chart Signals server with crypto + storage..."
+	@echo "Starting Trading Data Collector (Alpaca + Storage)..."
 	@echo "Loading symbols from watchlist.txt..."
-	@$(UV) run --python $(VENV) python ta_server_full.py
+	@$(UV) run --python $(VENV) python servers/trading/ta_server_full.py
 
-run-stocks:
-	@echo "Starting MCP Chart Signals server (stocks only)..."
-	@echo "Loading symbols from watchlist.txt..."
-	@$(UV) run --python $(VENV) python ta_server_alpaca.py
-
-run-basic:
-	@echo "Starting basic MCP server (webhook-based)..."
-	@$(UV) run --python $(VENV) python ta_server.py
+run-trading-mcp:
+	@echo "Testing Trading MCP Server..."
+	@$(UV) run --python $(VENV) python servers/trading/mcp_server_integrated.py
 
 test:
 	@echo "Running tests..."
