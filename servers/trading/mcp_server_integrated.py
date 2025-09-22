@@ -287,19 +287,25 @@ class MCPServer:
         if not symbol:
             return {"error": "Symbol required"}
 
-        # Determine if crypto
+        # Determine if crypto and normalize symbol
         is_crypto = "/" in symbol or symbol in ["BTC", "ETH"]
+
+        # Normalize crypto symbols to include /USD for file loading
+        if is_crypto and "/" not in symbol:
+            file_symbol = f"{symbol}/USD"
+        else:
+            file_symbol = symbol
 
         # Try to load from memory cache first
         cache_key = f"{symbol}-{timeframe}"
 
         # Load from parquet if not in cache
-        df = load_from_parquet(symbol, timeframe, is_crypto, days_back=7)
+        df = load_from_parquet(file_symbol, timeframe, is_crypto, days_back=7)
 
         if df is None or len(df) < 35:
             # Try loading 1min and aggregating if larger timeframe requested
             if timeframe != "1min":
-                df_1min = load_from_parquet(symbol, "1min", is_crypto, days_back=7)
+                df_1min = load_from_parquet(file_symbol, "1min", is_crypto, days_back=7)
                 if df_1min is not None and len(df_1min) >= 35:
                     df = self.aggregate_timeframe(df_1min, timeframe)
                 else:
