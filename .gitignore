@@ -22,6 +22,7 @@ env/
 
 # Data Files
 data/
+portfolio/
 *.parquet
 *.csv
 
