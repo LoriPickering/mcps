@@ -78,14 +78,14 @@ run-trading-mcp:
 test:
 	@echo "Running tests..."
 	@if [ -d "tests" ] && [ -n "$$(ls -A tests 2>/dev/null)" ]; then \
-		$(UV) run --python $(VENV) pytest tests -v; \
+		PYTHONPATH=$(PWD) $(VENV)/bin/python -m pytest tests -v; \
 	else \
 		echo "No tests found"; \
 	fi
 
 test-mcp:
 	@echo "Testing MCP server specifically..."
-	@$(UV) run --python $(VENV) python -m pytest tests/test_mcp_server.py -v 2>/dev/null || echo "MCP-specific tests not found"
+	@PYTHONPATH=$(PWD) $(VENV)/bin/python -m pytest tests/test_mcp_server.py -v 2>/dev/null || echo "MCP-specific tests not found"
 
 docs:
 	@echo "Checking documentation..."
