@@ -61,7 +61,9 @@ def sample_ohlcv_data():
         })
 
     df = pd.DataFrame(data)
-    df.set_index('timestamp', inplace=True)
+    # Rename timestamp to time to match server expectations
+    df.rename(columns={'timestamp': 'time'}, inplace=True)
+    # Don't set index - keep time as a column
     return df
 
 
@@ -99,16 +101,26 @@ def sample_ohlcv_with_indicators():
         })
 
     df = pd.DataFrame(data)
-    df.set_index('timestamp', inplace=True)
+    # Rename timestamp to time to match server expectations
+    df.rename(columns={'timestamp': 'time'}, inplace=True)
+    # Don't set index - keep time as a column
 
     # Add indicators
-    df['rsi'] = pd.Series([50 + np.random.normal(0, 10) for _ in range(len(df))], index=df.index)
+    df['rsi'] = [50 + np.random.normal(0, 10) for _ in range(len(df))]
     df['rsi'] = df['rsi'].clip(0, 100)
 
-    # Simple MACD simulation
-    df['macd'] = pd.Series([np.random.normal(0, 0.5) for _ in range(len(df))], index=df.index)
-    df['macd_signal'] = df['macd'].rolling(9).mean()
-    df['macd_histogram'] = df['macd'] - df['macd_signal']
+    # Simple MACD simulation (using the server's column names)
+    df['macd'] = [np.random.normal(0, 0.5) for _ in range(len(df))]
+    df['signal'] = df['macd'].rolling(9).mean()  # Note: server expects 'signal', not 'macd_signal'
+    df['hist'] = df['macd'] - df['signal']  # Note: server expects 'hist', not 'macd_histogram'
+
+    # Moving averages
+    df['ema9'] = df['close'].ewm(span=9).mean()
+    df['ma10'] = df['close'].rolling(10).mean()
+
+    # VWAP simulation
+    typical_price = (df['high'] + df['low'] + df['close']) / 3
+    df['vwap'] = (typical_price * df['volume']).cumsum() / df['volume'].cumsum()
 
     # Bollinger Bands simulation
     df['bb_upper'] = df['close'] + np.random.uniform(1, 3, len(df))
