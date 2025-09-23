@@ -92,16 +92,38 @@ def detect_crossings_with_history(df: pd.DataFrame) -> Dict[str, Any]:
     last = df.iloc[-1]
     prev = df.iloc[-2]
 
-    # Basic crossings
-    crossings["macd_cross_up"] = bool(prev["macd"] <= prev["signal"] and last["macd"] > last["signal"])
-    crossings["macd_cross_dn"] = bool(prev["macd"] >= prev["signal"] and last["macd"] < last["signal"])
-    crossings["ema_support_lost"] = bool(prev["close"] >= prev["ema9"] and last["close"] < last["ema9"])
-    crossings["ema_reclaim"] = bool(prev["close"] <= prev["ema9"] and last["close"] > last["ema9"])
-    crossings["rsi_overbought"] = bool(last["rsi"] >= 70)
-    crossings["rsi_oversold"] = bool(last["rsi"] <= 30)
-    crossings["bb_squeeze"] = bool((last["bb_upper"] - last["bb_lower"]) / last["bb_middle"] < 0.04)
-    crossings["bb_breakout_up"] = bool(last["close"] > last["bb_upper"])
-    crossings["bb_breakout_dn"] = bool(last["close"] < last["bb_lower"])
+    # Basic crossings - handle None values
+    crossings["macd_cross_up"] = bool(
+        prev["macd"] is not None and prev["signal"] is not None and
+        last["macd"] is not None and last["signal"] is not None and
+        prev["macd"] <= prev["signal"] and last["macd"] > last["signal"]
+    )
+    crossings["macd_cross_dn"] = bool(
+        prev["macd"] is not None and prev["signal"] is not None and
+        last["macd"] is not None and last["signal"] is not None and
+        prev["macd"] >= prev["signal"] and last["macd"] < last["signal"]
+    )
+    crossings["ema_support_lost"] = bool(
+        prev["ema9"] is not None and last["ema9"] is not None and
+        prev["close"] >= prev["ema9"] and last["close"] < last["ema9"]
+    )
+    crossings["ema_reclaim"] = bool(
+        prev["ema9"] is not None and last["ema9"] is not None and
+        prev["close"] <= prev["ema9"] and last["close"] > last["ema9"]
+    )
+    crossings["rsi_overbought"] = bool(last["rsi"] is not None and last["rsi"] >= 70)
+    crossings["rsi_oversold"] = bool(last["rsi"] is not None and last["rsi"] <= 30)
+    crossings["bb_squeeze"] = bool(
+        last["bb_upper"] is not None and last["bb_lower"] is not None and
+        last["bb_middle"] is not None and last["bb_middle"] != 0 and
+        (last["bb_upper"] - last["bb_lower"]) / last["bb_middle"] < 0.04
+    )
+    crossings["bb_breakout_up"] = bool(
+        last["bb_upper"] is not None and last["close"] > last["bb_upper"]
+    )
+    crossings["bb_breakout_dn"] = bool(
+        last["bb_lower"] is not None and last["close"] < last["bb_lower"]
+    )
 
     # Count bars since each type of crossing
     for i in range(len(df) - 1, -1, -1):
@@ -110,30 +132,35 @@ def detect_crossings_with_history(df: pd.DataFrame) -> Dict[str, Any]:
 
         # MACD crosses
         if prev_row is not None:
-            if prev_row["macd"] <= prev_row["signal"] and row["macd"] > row["signal"]:
-                if "macd_cross_up_bars" not in bars_since:
-                    bars_since["macd_cross_up_bars"] = len(df) - 1 - i
-                    if not last_cross_info["type"]:
-                        last_cross_info = {"type": "macd_cross_up", "at": str(row.name)}
+            # Check for None values before comparison
+            if (prev_row["macd"] is not None and prev_row["signal"] is not None and
+                row["macd"] is not None and row["signal"] is not None):
 
-            if prev_row["macd"] >= prev_row["signal"] and row["macd"] < row["signal"]:
-                if "macd_cross_dn_bars" not in bars_since:
-                    bars_since["macd_cross_dn_bars"] = len(df) - 1 - i
-                    if not last_cross_info["type"]:
-                        last_cross_info = {"type": "macd_cross_dn", "at": str(row.name)}
+                if prev_row["macd"] <= prev_row["signal"] and row["macd"] > row["signal"]:
+                    if "macd_cross_up_bars" not in bars_since:
+                        bars_since["macd_cross_up_bars"] = len(df) - 1 - i
+                        if not last_cross_info["type"]:
+                            last_cross_info = {"type": "macd_cross_up", "at": str(row.name)}
+
+                if prev_row["macd"] >= prev_row["signal"] and row["macd"] < row["signal"]:
+                    if "macd_cross_dn_bars" not in bars_since:
+                        bars_since["macd_cross_dn_bars"] = len(df) - 1 - i
+                        if not last_cross_info["type"]:
+                            last_cross_info = {"type": "macd_cross_dn", "at": str(row.name)}
 
             # EMA crosses
-            if prev_row["close"] >= prev_row["ema9"] and row["close"] < row["ema9"]:
-                if "ema_support_lost_bars" not in bars_since:
-                    bars_since["ema_support_lost_bars"] = len(df) - 1 - i
-                    if not last_cross_info["type"]:
-                        last_cross_info = {"type": "ema_support_lost", "at": str(row.name)}
+            if (prev_row["ema9"] is not None and row["ema9"] is not None):
+                if prev_row["close"] >= prev_row["ema9"] and row["close"] < row["ema9"]:
+                    if "ema_support_lost_bars" not in bars_since:
+                        bars_since["ema_support_lost_bars"] = len(df) - 1 - i
+                        if not last_cross_info["type"]:
+                            last_cross_info = {"type": "ema_support_lost", "at": str(row.name)}
 
-            if prev_row["close"] <= prev_row["ema9"] and row["close"] > row["ema9"]:
-                if "ema_reclaim_bars" not in bars_since:
-                    bars_since["ema_reclaim_bars"] = len(df) - 1 - i
-                    if not last_cross_info["type"]:
-                        last_cross_info = {"type": "ema_reclaim", "at": str(row.name)}
+                if prev_row["close"] <= prev_row["ema9"] and row["close"] > row["ema9"]:
+                    if "ema_reclaim_bars" not in bars_since:
+                        bars_since["ema_reclaim_bars"] = len(df) - 1 - i
+                        if not last_cross_info["type"]:
+                            last_cross_info = {"type": "ema_reclaim", "at": str(row.name)}
 
     return {
         "crossings": crossings,
@@ -330,10 +357,18 @@ class MCPServer:
         # Calculate indicators
         df["ema9"] = ta.ema(df["close"], length=9)
         df["ma10"] = ta.sma(df["close"], length=10)
+
+        # MACD calculation with error handling
         macd = ta.macd(df["close"], fast=12, slow=26, signal=9)
-        df["macd"] = macd["MACD_12_26_9"]
-        df["signal"] = macd["MACDs_12_26_9"]
-        df["hist"] = macd["MACDh_12_26_9"]
+        if macd is not None and not macd.empty:
+            df["macd"] = macd["MACD_12_26_9"]
+            df["signal"] = macd["MACDs_12_26_9"]
+            df["hist"] = macd["MACDh_12_26_9"]
+        else:
+            df["macd"] = None
+            df["signal"] = None
+            df["hist"] = None
+
         df["rsi"] = ta.rsi(df["close"], length=14)
 
         # Bollinger Bands
@@ -421,11 +456,11 @@ class MCPServer:
         df["time"] = pd.to_datetime(df["time"])
         df.set_index("time", inplace=True)
 
-        # Resample mapping
+        # Resample mapping (using new pandas notation)
         resample_map = {
-            "5min": "5T",
-            "15min": "15T",
-            "1hour": "1H"
+            "5min": "5min",
+            "15min": "15min",
+            "1hour": "1h"
         }
 
         if target_tf in resample_map:
