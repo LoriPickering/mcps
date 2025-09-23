@@ -31,6 +31,8 @@ RGTI
 QBTS
 QUBT
 IONQ
+ARM
+HLIO
 
 # Crypto (automatically adds USD suffix)
 BTC
