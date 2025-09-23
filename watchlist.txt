@@ -27,6 +27,10 @@ SERV
 ACHR
 BITQ
 UEC
+RGTI
+QBTS
+QUBT
+IONQ
 
 # Crypto (automatically adds USD suffix)
 BTC

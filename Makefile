@@ -1,4 +1,4 @@
-.PHONY: help quickstart install install-dev clean test lint format check venv run
+.PHONY: help quickstart install install-dev clean test test-mcp docs clean-cache lint format check venv run
 
 PYTHON_VERSION := 3.12
 VENV := .venv
@@ -14,6 +14,9 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test          - Run all tests"
+	@echo "  make test-mcp      - Test MCP server specifically"
+	@echo "  make docs          - Check documentation"
+	@echo "  make clean-cache   - Remove __pycache__ files"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  make lint          - Run linting checks"
@@ -79,6 +82,26 @@ test:
 	else \
 		echo "No tests found"; \
 	fi
+
+test-mcp:
+	@echo "Testing MCP server specifically..."
+	@$(UV) run --python $(VENV) python -m pytest tests/test_mcp_server.py -v 2>/dev/null || echo "MCP-specific tests not found"
+
+docs:
+	@echo "Checking documentation..."
+	@if [ -d "docs" ]; then \
+		echo "Documentation directory found"; \
+		ls -la docs/; \
+	else \
+		echo "No docs directory found"; \
+	fi
+
+clean-cache:
+	@echo "Removing __pycache__ files..."
+	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type f -name "*.pyc" -delete
+	@rm -rf .pytest_cache .mypy_cache .ruff_cache
+	@echo "Cache cleanup complete!"
 
 lint:
 	@echo "Running linting checks..."

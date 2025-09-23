@@ -60,7 +60,8 @@ mcps/
 │   └── trading/       # Trading signals server
 ├── data/              # Historical market data (gitignored)
 ├── docs/              # Documentation
-├── scripts/           # Utilities
+├── scripts/           # Utility scripts and tools
+├── tests/             # Test suite
 ├── watchlist.txt      # Symbols to monitor
 └── Makefile           # Common commands
 ```
@@ -70,6 +71,21 @@ mcps/
 - `make run` - Start data collection
 - `make install` - Install dependencies
 - `make clean` - Remove cache/temp files
+- `make test` - Run test suite
+- `make test-mcp` - Test MCP server specifically
+- `make docs` - Check documentation
+- `make clean-cache` - Remove __pycache__ files
+
+## Testing
+
+The project includes a comprehensive test suite. Run tests with:
+
+```bash
+make test          # Run all tests
+make test-mcp      # Test MCP server specifically
+```
+
+Tests are located in the `tests/` directory and cover MCP server functionality, data processing, and API integrations.
 
 ## Adding New Servers
 

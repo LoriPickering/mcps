@@ -6,9 +6,7 @@ Real-time market data and technical indicators via Alpaca Markets.
 
 - `ta_server_full.py` - Main data collector (WebSocket + storage)
 - `mcp_server_integrated.py` - MCP interface for AI assistants
-- `ta_server_alpaca.py` - Stocks-only version (legacy)
-- `ta_server.py` - Original webhook version (legacy)
-- `mcp_server.py` - Basic MCP example (mock data)
+- `legacy/` - Archived legacy server implementations
 
 ## Usage
 
