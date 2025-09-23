@@ -93,15 +93,15 @@ def detect_crossings_with_history(df: pd.DataFrame) -> Dict[str, Any]:
     prev = df.iloc[-2]
 
     # Basic crossings
-    crossings["macd_cross_up"] = prev["macd"] <= prev["signal"] and last["macd"] > last["signal"]
-    crossings["macd_cross_dn"] = prev["macd"] >= prev["signal"] and last["macd"] < last["signal"]
-    crossings["ema_support_lost"] = prev["close"] >= prev["ema9"] and last["close"] < last["ema9"]
-    crossings["ema_reclaim"] = prev["close"] <= prev["ema9"] and last["close"] > last["ema9"]
-    crossings["rsi_overbought"] = last["rsi"] >= 70
-    crossings["rsi_oversold"] = last["rsi"] <= 30
-    crossings["bb_squeeze"] = (last["bb_upper"] - last["bb_lower"]) / last["bb_middle"] < 0.04
-    crossings["bb_breakout_up"] = last["close"] > last["bb_upper"]
-    crossings["bb_breakout_dn"] = last["close"] < last["bb_lower"]
+    crossings["macd_cross_up"] = bool(prev["macd"] <= prev["signal"] and last["macd"] > last["signal"])
+    crossings["macd_cross_dn"] = bool(prev["macd"] >= prev["signal"] and last["macd"] < last["signal"])
+    crossings["ema_support_lost"] = bool(prev["close"] >= prev["ema9"] and last["close"] < last["ema9"])
+    crossings["ema_reclaim"] = bool(prev["close"] <= prev["ema9"] and last["close"] > last["ema9"])
+    crossings["rsi_overbought"] = bool(last["rsi"] >= 70)
+    crossings["rsi_oversold"] = bool(last["rsi"] <= 30)
+    crossings["bb_squeeze"] = bool((last["bb_upper"] - last["bb_lower"]) / last["bb_middle"] < 0.04)
+    crossings["bb_breakout_up"] = bool(last["close"] > last["bb_upper"])
+    crossings["bb_breakout_dn"] = bool(last["close"] < last["bb_lower"])
 
     # Count bars since each type of crossing
     for i in range(len(df) - 1, -1, -1):
