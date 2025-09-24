@@ -1,4 +1,4 @@
-.PHONY: help quickstart install install-dev clean test test-mcp docs clean-cache lint format check venv run
+.PHONY: help quickstart install install-dev clean test test-mcp test-all test-quick docs clean-cache lint format check venv run
 
 PYTHON_VERSION := 3.12
 VENV := .venv
@@ -13,8 +13,10 @@ help:
 	@echo "  make clean         - Remove virtual environment and cache files"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test          - Run all tests"
-	@echo "  make test-mcp      - Test MCP server specifically"
+	@echo "  make test          - Run code-based unit tests"
+	@echo "  make test-mcp      - Run MCP server tests only"
+	@echo "  make test-all      - Run ALL tests (unit + MCP + integration)"
+	@echo "  make test-quick    - Quick MCP health check"
 	@echo "  make docs          - Check documentation"
 	@echo "  make clean-cache   - Remove __pycache__ files"
 	@echo ""
@@ -76,16 +78,49 @@ run-trading-mcp:
 	@$(UV) run --python $(VENV) python servers/trading/mcp_server_integrated.py
 
 test:
-	@echo "Running tests..."
-	@if [ -d "tests" ] && [ -n "$$(ls -A tests 2>/dev/null)" ]; then \
-		PYTHONPATH=$(PWD) $(VENV)/bin/python -m pytest tests -v; \
+	@echo "Running code-based unit tests..."
+	@echo "=========================================="
+	@if [ -d "tests" ]; then \
+		PYTHONPATH=$(PWD) $(VENV)/bin/python -m pytest tests/test_indicators.py tests/test_integration.py -v --tb=short; \
 	else \
 		echo "No tests found"; \
 	fi
 
 test-mcp:
-	@echo "Testing MCP server specifically..."
-	@PYTHONPATH=$(PWD) $(VENV)/bin/python -m pytest tests/test_mcp_server.py -v 2>/dev/null || echo "MCP-specific tests not found"
+	@echo "Running MCP server tests..."
+	@echo "=========================================="
+	@PYTHONPATH=$(PWD) $(VENV)/bin/python -m pytest tests/test_mcp_server.py tests/integration/test_mcp_darpa_integration.py -v --tb=short
+
+test-all:
+	@echo "Running ALL tests (unit + MCP + integration)..."
+	@echo "=========================================="
+	@if [ -x "scripts/test_all_mcp.sh" ]; then \
+		./scripts/test_all_mcp.sh; \
+	else \
+		PYTHONPATH=$(PWD) $(VENV)/bin/python -m pytest tests/ -v --tb=short; \
+	fi
+
+test-quick:
+	@echo "Quick MCP health check..."
+	@echo "=========================================="
+	@PYTHONPATH=$(PWD) $(VENV)/bin/python scripts/test_mcp_health.py --quick
+
+test-summary:
+	@echo "Test Suite Summary:"
+	@echo "=========================================="
+	@echo "Available test commands:"
+	@echo "  make test        - Unit tests (indicators, integration)"
+	@echo "  make test-mcp    - MCP server tests only"
+	@echo "  make test-all    - Complete test suite"
+	@echo "  make test-quick  - Quick health check (4 tests)"
+	@echo ""
+	@echo "Test file locations:"
+	@echo "  Unit tests:       tests/test_indicators.py"
+	@echo "  MCP tests:        tests/test_mcp_server.py"
+	@echo "  Integration:      tests/integration/"
+	@echo "  Health check:     scripts/test_mcp_health.py"
+	@echo ""
+	@echo "Run 'make test-quick' for a fast system check"
 
 docs:
 	@echo "Checking documentation..."

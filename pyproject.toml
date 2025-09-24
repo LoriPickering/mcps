@@ -27,6 +27,11 @@ dependencies = [
     "alpaca-py>=0.13.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.24.0",
+
+    # News & Sentiment Analysis
+    "transformers>=4.36.0",
+    "torch>=2.0.0",  # For transformers
+    "sentencepiece>=0.1.99",  # For some tokenizers
 ]
 
 [project.scripts]

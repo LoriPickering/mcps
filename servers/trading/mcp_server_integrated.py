@@ -30,6 +30,12 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent.absolute()
 DATA_DIR = PROJECT_ROOT / "data"
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Import news collector (lazy import inside methods to avoid dependency issues)
+NEWS_COLLECTOR = None
+
+# Import DARPA events monitor (lazy import)
+DARPA_MONITOR = None
+
 # Load env from project root
 env_path = PROJECT_ROOT / ".env"
 load_dotenv(env_path)
@@ -174,6 +180,9 @@ class MCPServer:
     def __init__(self):
         self.running = True
         ensure_data_directories()
+        self.news_collector = None  # Lazy initialize
+        self.events_tracker = None  # Lazy initialize
+        self.darpa_monitor = None  # Lazy initialize
         logger.info("MCP Server initialized with real data integration")
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -258,6 +267,67 @@ class MCPServer:
                                 "type": "object",
                                 "properties": {}
                             }
+                        },
+                        {
+                            "name": "get_macro_events",
+                            "description": "Get upcoming macro events (Fed, FOMC, economic data)",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "hours_ahead": {
+                                        "type": "integer",
+                                        "description": "Hours to look ahead (default: 48)",
+                                        "default": 48
+                                    },
+                                    "min_importance": {
+                                        "type": "string",
+                                        "enum": ["low", "medium", "high", "critical"],
+                                        "default": "medium"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "name": "get_powell_schedule",
+                            "description": "Get Jerome Powell's speaking schedule",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {}
+                            }
+                        },
+                        {
+                            "name": "get_darpa_events",
+                            "description": "Get DARPA-style frontier tech events and signals",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "hours_back": {
+                                        "type": "integer",
+                                        "description": "Hours to look back for recent events (default: 24)",
+                                        "default": 24
+                                    },
+                                    "source": {
+                                        "type": "string",
+                                        "enum": ["all", "darpa", "dod_contracts", "arxiv"],
+                                        "default": "all"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "name": "check_ticker_availability",
+                            "description": "Check Alpaca data availability for tickers",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "symbols": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "List of ticker symbols to check"
+                                    }
+                                },
+                                "required": ["symbols"]
+                            }
                         }
                     ]
                 }
@@ -282,6 +352,22 @@ class MCPServer:
                 result = self.get_storage_info()
             elif tool_name == "get_capabilities":
                 result = self.get_capabilities()
+            elif tool_name == "get_macro_events":
+                result = self.get_macro_events(
+                    tool_args.get("hours_ahead", 48),
+                    tool_args.get("min_importance", "medium")
+                )
+            elif tool_name == "get_powell_schedule":
+                result = self.get_powell_schedule()
+            elif tool_name == "get_darpa_events":
+                result = self.get_darpa_events(
+                    tool_args.get("hours_back", 24),
+                    tool_args.get("source", "all")
+                )
+            elif tool_name == "check_ticker_availability":
+                result = self.check_ticker_availability(
+                    tool_args.get("symbols", [])
+                )
             else:
                 result = {"error": f"Unknown tool: {tool_name}"}
 
@@ -306,6 +392,54 @@ class MCPServer:
                 "error": {
                     "code": -32601,
                     "message": f"Method not found: {method}"
+                }
+            }
+
+    def get_news_sentiment(self, symbol: str) -> Dict[str, Any]:
+        """Get news sentiment for a symbol"""
+        try:
+            # Lazy import and initialize news collector
+            if self.news_collector is None:
+                logger.info("Initializing NewsCollector...")
+                from servers.trading.news_collector import NewsCollector
+                self.news_collector = NewsCollector()
+                logger.info("NewsCollector initialized successfully")
+
+            # Get aggregated sentiment for last 24 hours
+            logger.info(f"Fetching news sentiment for {symbol}...")
+            sentiment = self.news_collector.get_aggregated_sentiment(symbol, hours_back=24)
+            logger.info(f"News sentiment for {symbol}: {sentiment.get('sentiment_label')} ({sentiment.get('news_count')} items)")
+
+            return {
+                "enabled": True,
+                "status": "active",
+                "last_update": datetime.now(timezone.utc).isoformat(),
+                "sentiment": sentiment
+            }
+        except ImportError as e:
+            logger.error(f"Failed to import NewsCollector: {e}")
+            return {
+                "enabled": False,
+                "status": "import_error",
+                "error": f"Module import failed: {str(e)}",
+                "sentiment": {
+                    "sentiment_score": 0.0,
+                    "sentiment_label": "NEUTRAL",
+                    "news_count": 0,
+                    "trending": False
+                }
+            }
+        except Exception as e:
+            logger.warning(f"News sentiment unavailable for {symbol}: {e}")
+            return {
+                "enabled": False,
+                "status": "error",
+                "error": str(e),
+                "sentiment": {
+                    "sentiment_score": 0.0,
+                    "sentiment_label": "NEUTRAL",
+                    "news_count": 0,
+                    "trending": False
                 }
             }
 
@@ -436,18 +570,38 @@ class MCPServer:
         # Determine risk anchor
         risk_anchor = self.calculate_risk_anchor(df, last, trend_state)
 
+        # Get news sentiment (non-blocking)
+        news_data = self.get_news_sentiment(symbol)
+
+        # Adjust trend state based on news if available
+        if news_data.get("enabled") and news_data["sentiment"]["news_count"] > 0:
+            news_sentiment = news_data["sentiment"]["sentiment_label"]
+            news_score = news_data["sentiment"]["sentiment_score"]
+
+            # Strong news sentiment can influence trend interpretation
+            if abs(news_score) > 0.5:  # Strong sentiment
+                if news_sentiment == "POSITIVE" and trend_state == "bearish":
+                    trend_state = "mixed"  # Conflicting signals
+                elif news_sentiment == "NEGATIVE" and trend_state == "bullish":
+                    trend_state = "mixed"  # Conflicting signals
+                elif news_sentiment == "POSITIVE" and trend_state == "mixed":
+                    trend_state = "bullish"  # News confirms bullish
+                elif news_sentiment == "NEGATIVE" and trend_state == "mixed":
+                    trend_state = "bearish"  # News confirms bearish
+
         return {
             "ready": True,
             "symbol": symbol,
             "asset_type": "crypto" if is_crypto else "stock",
             "tf": timeframe,
             "snapshot": snapshot,
-            "prev_snapshot": prev_snapshot,  # NEW: Previous bar for deltas
-            "trend_state": trend_state,      # NEW: Compact position summary
-            "risk_anchor": risk_anchor,      # NEW: Stop loss suggestion
+            "prev_snapshot": prev_snapshot,  # Previous bar for deltas
+            "trend_state": trend_state,      # Compact position summary
+            "risk_anchor": risk_anchor,      # Stop loss suggestion
             "crossings": crossing_data["crossings"],
             "bars_since": crossing_data["bars_since"],
-            "last_cross": crossing_data["last_cross"]
+            "last_cross": crossing_data["last_cross"],
+            "news": news_data  # NEW: News sentiment data
         }
 
     def aggregate_timeframe(self, df_1min: pd.DataFrame, target_tf: str) -> pd.DataFrame:
@@ -824,6 +978,293 @@ class MCPServer:
             risk_anchor["distance_pct"] = round(risk_anchor["distance_pct"], 2)
 
         return risk_anchor
+
+    def get_macro_events(self, hours_ahead: int = 48, min_importance: str = "medium") -> Dict[str, Any]:
+        """Get upcoming macro events"""
+        try:
+            # Import EventImportance at function level to ensure it's available
+            from servers.trading.macro_events_tracker import MacroEventsTracker, EventImportance
+
+            # Lazy initialize events tracker
+            if self.events_tracker is None:
+                self.events_tracker = MacroEventsTracker()
+                logger.info("MacroEventsTracker initialized")
+
+            # Map importance string to enum
+            importance_map = {
+                "low": EventImportance.LOW,
+                "medium": EventImportance.MEDIUM,
+                "high": EventImportance.HIGH,
+                "critical": EventImportance.CRITICAL
+            }
+            min_imp = importance_map.get(min_importance, EventImportance.MEDIUM)
+
+            # Get events
+            events = self.events_tracker.get_upcoming_events(
+                hours_ahead=hours_ahead,
+                min_importance=min_imp
+            )
+
+            # Get today's events by period
+            today_events = self.events_tracker.get_today_events()
+
+            # Assess market impact
+            impact_assessment = self.events_tracker.assess_market_impact(events)
+
+            # Format events for response
+            formatted_events = []
+            for event in events[:20]:  # Limit to 20 events
+                formatted_events.append({
+                    'datetime': event.datetime.isoformat(),
+                    'title': event.title,
+                    'category': event.category.value,
+                    'importance': event.importance.value,
+                    'impact': event.impact,
+                    'speakers': event.speakers,
+                    'forecast': event.forecast,
+                    'previous': event.previous
+                })
+
+            return {
+                'status': 'success',
+                'hours_ahead': hours_ahead,
+                'min_importance': min_importance,
+                'total_events': len(events),
+                'events': formatted_events,
+                'today': {
+                    'pre_market': len(today_events['pre_market']),
+                    'regular_hours': len(today_events['regular_hours']),
+                    'after_hours': len(today_events['after_hours'])
+                },
+                'market_impact': impact_assessment,
+                'next_high_impact': formatted_events[0] if formatted_events else None
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching macro events: {e}")
+            return {
+                'status': 'error',
+                'error': str(e),
+                'events': []
+            }
+
+    def get_powell_schedule(self) -> Dict[str, Any]:
+        """Get Powell's speaking schedule"""
+        try:
+            # Lazy initialize if needed
+            if self.events_tracker is None:
+                from servers.trading.macro_events_tracker import MacroEventsTracker
+                self.events_tracker = MacroEventsTracker()
+
+            # Get Powell events
+            powell_events = self.events_tracker.get_powell_schedule()
+
+            # Format events
+            formatted_events = []
+            for event in powell_events[:10]:  # Limit to next 10
+                formatted_events.append({
+                    'datetime': event.datetime.isoformat(),
+                    'title': event.title,
+                    'impact': event.impact,
+                    'description': event.description,
+                    'metadata': event.metadata
+                })
+
+            # Find next speech
+            next_speech = None
+            now = datetime.now(timezone.utc)
+            for event in powell_events:
+                if event.datetime > now:
+                    next_speech = {
+                        'datetime': event.datetime.isoformat(),
+                        'title': event.title,
+                        'hours_until': (event.datetime - now).total_seconds() / 3600
+                    }
+                    break
+
+            return {
+                'status': 'success',
+                'total_scheduled': len(powell_events),
+                'next_speech': next_speech,
+                'upcoming_speeches': formatted_events
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching Powell schedule: {e}")
+            return {
+                'status': 'error',
+                'error': str(e),
+                'upcoming_speeches': []
+            }
+
+    def get_darpa_events(self, hours_back: int = 24, source: str = "all") -> Dict[str, Any]:
+        """Get DARPA-style frontier tech events"""
+        try:
+            # Lazy initialize
+            if self.darpa_monitor is None:
+                from servers.trading.darpa_events_monitor import DARPAEventsMonitor
+                self.darpa_monitor = DARPAEventsMonitor()
+                logger.info("DARPAEventsMonitor initialized")
+
+            # Get events based on source
+            all_events = []
+
+            if source in ["all", "darpa"]:
+                darpa_events = self.darpa_monitor.fetch_darpa_news()
+                all_events.extend(darpa_events)
+                logger.info(f"Fetched {len(darpa_events)} DARPA/SAM.gov events")
+
+            if source in ["all", "dod_contracts"]:
+                contract_events = self.darpa_monitor.fetch_dod_contracts()
+                all_events.extend(contract_events)
+
+            if source in ["all", "arxiv"]:
+                research_events = self.darpa_monitor.fetch_arxiv_papers()
+                all_events.extend(research_events)
+
+            # Filter by time window
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+            filtered = [e for e in all_events if e.datetime >= cutoff]
+
+            # Sort by importance and datetime
+            filtered.sort(key=lambda x: (x.importance, x.datetime), reverse=True)
+
+            # Format for response
+            formatted_events = []
+            for event in filtered[:30]:  # Limit to 30 events
+                formatted_events.append({
+                    'datetime': event.datetime.isoformat(),
+                    'title': event.title,
+                    'source': event.source.value if hasattr(event.source, 'value') else str(event.source),
+                    'signal_type': event.signal_type.value if hasattr(event.signal_type, 'value') else str(event.signal_type),
+                    'importance': event.importance,
+                    'companies': event.companies,
+                    'technology_domain': event.technology_domain,
+                    'description': event.description,
+                    'url': event.url,
+                    'metadata': event.metadata
+                })
+
+            # Collect unique tickers mentioned
+            all_tickers = set()
+            for event in filtered:
+                all_tickers.update(event.companies)
+
+            return {
+                'status': 'success',
+                'total_events': len(filtered),
+                'events': formatted_events,
+                'mentioned_tickers': list(all_tickers),
+                'time_range': {
+                    'hours_back': hours_back,
+                    'cutoff': cutoff.isoformat()
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching DARPA events: {e}")
+            return {
+                'status': 'error',
+                'error': str(e),
+                'events': []
+            }
+
+    def check_ticker_availability(self, symbols: List[str]) -> Dict[str, Any]:
+        """Check Alpaca data availability for tickers using snapshot API"""
+        try:
+            from alpaca.data.historical import StockHistoricalDataClient
+            from alpaca.data.requests import StockSnapshotRequest
+            from datetime import datetime
+            import pytz
+
+            # Initialize client
+            api_key = os.getenv("ALPACA_API_KEY")
+            secret_key = os.getenv("ALPACA_SECRET_KEY")
+
+            if not api_key or not secret_key:
+                return {
+                    'status': 'error',
+                    'error': 'Alpaca API keys not configured'
+                }
+
+            client = StockHistoricalDataClient(api_key, secret_key, raw_data=False)
+
+            # Check symbols using snapshot API
+            results = {}
+
+            try:
+                request = StockSnapshotRequest(symbol_or_symbols=symbols)
+                snapshots = client.get_stock_snapshot(request)
+
+                for symbol in symbols:
+                    if symbol in snapshots and snapshots[symbol]:
+                        snapshot = snapshots[symbol]
+                        if snapshot.latest_trade:
+                            results[symbol] = {
+                                'available': True,
+                                'last_price': float(snapshot.latest_trade.price),
+                                'last_update': snapshot.latest_trade.timestamp.isoformat(),
+                                'volume': int(snapshot.daily_bar.volume) if snapshot.daily_bar else 0,
+                                'data_quality': 'real-time',
+                                'bid': float(snapshot.latest_quote.bid_price) if snapshot.latest_quote else None,
+                                'ask': float(snapshot.latest_quote.ask_price) if snapshot.latest_quote else None
+                            }
+                        else:
+                            results[symbol] = {
+                                'available': False,
+                                'reason': 'No recent trades'
+                            }
+                    else:
+                        results[symbol] = {
+                            'available': False,
+                            'reason': 'Symbol not found'
+                        }
+
+            except Exception as e:
+                # Fallback to checking individually
+                for symbol in symbols:
+                    try:
+                        request = StockSnapshotRequest(symbol_or_symbols=symbol)
+                        snapshot_data = client.get_stock_snapshot(request)
+
+                        if symbol in snapshot_data and snapshot_data[symbol] and snapshot_data[symbol].latest_trade:
+                            snapshot = snapshot_data[symbol]
+                            results[symbol] = {
+                                'available': True,
+                                'last_price': float(snapshot.latest_trade.price),
+                                'last_update': snapshot.latest_trade.timestamp.isoformat(),
+                                'data_quality': 'real-time'
+                            }
+                        else:
+                            results[symbol] = {
+                                'available': False,
+                                'reason': 'No data available'
+                            }
+                    except Exception as sym_err:
+                        results[symbol] = {
+                            'available': False,
+                            'reason': str(sym_err)[:100]
+                        }
+
+            # Summary
+            available_count = sum(1 for r in results.values() if r.get('available', False))
+
+            return {
+                'status': 'success',
+                'total_checked': len(symbols),
+                'available': available_count,
+                'unavailable': len(symbols) - available_count,
+                'results': results,
+                'note': 'Using Alpaca snapshot API for real-time quotes'
+            }
+
+        except Exception as e:
+            logger.error(f"Error checking ticker availability: {e}")
+            return {
+                'status': 'error',
+                'error': str(e),
+                'results': {}
+            }
 
     async def run(self):
         """Main loop to handle stdin/stdout communication"""

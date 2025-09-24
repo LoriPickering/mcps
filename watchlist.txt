@@ -34,6 +34,13 @@ IONQ
 ARM
 HLIO
 
+# DARPA-style frontier tech investments
+DNA    # Ginkgo Bioworks - synthetic biology
+KRMN   # Karman Holdings - space/defense
+KTOS   # Kratos Defense - autonomous systems
+AVAV   # AeroVironment - UAV/robotics
+MRCY   # Mercury Systems - defense tech
+
 # Crypto (automatically adds USD suffix)
 BTC
 ETH
